@@ -42,8 +42,6 @@ plt.axis('off')
 plt.show()
 ```
 
-![Image Description](docs/images/nuclear_channel.png)
-
 #### Expected Output
 
 ```
@@ -57,6 +55,9 @@ Number of Channels: 25
   Channel 1: DAPI (ID: Channel:0)
   ...
 ```
+
+![Image Description](docs/images/nuclear_channel.png)
+
 
 ### Step 2: Image Preprocessing
 

@@ -127,3 +127,69 @@ plt.show()
 ## Output
 
 - **Segmentation Results**: Visualizations of the segmented regions with original and randomized labels.
+
+---
+
+## Example: Running Segmentation with Mesmer
+
+This is an example on how to run the workflow with **Mesmer** from the Van Valen lab. Mesmer is available at [DeepCell GitHub](https://github.com/vanvalenlab/deepcell-tf).
+
+**Reference**:
+Greenwald NF, Miller G, Moen E, et al. Whole-cell segmentation of tissue images with human-level performance using large-scale data annotation and deep learning. *Nat Biotechnol.* 2022;40(4):555-565. doi: [10.1038/s41587-021-01094-0](https://doi.org/10.1038/s41587-021-01094-0).
+
+Here is an example of how to run Mesmer with **SegFlow**:
+
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+from segflow import OMETiffHelper, SegFlow
+from deepcell.applications import Mesmer
+from segflow.segmentation_methods import GenericSegmentationMethod
+
+# Define a custom Mesmer segmentation method
+class MesmerSegmentationMethod(GenericSegmentationMethod):
+    def __init__(self, image_mpp):
+        super().__init__(image_mpp)
+        self.app = Mesmer()
+    
+    def run_segmentation(self, tiles, batch_size=64):
+        segmentation_tiles = []
+        for i in range(0, len(tiles), batch_size):
+            batch_tiles = tiles[i:i+batch_size]
+            preds = self.app.predict(batch_tiles, image_mpp=self.image_mpp)
+            segmentation_tiles.extend(preds)
+            print(f"Processed batch {i // batch_size + 1}/{(len(tiles) - 1) // batch_size + 1}")
+        segmentation_tiles = np.array(segmentation_tiles)
+        return segmentation_tiles
+
+# Example with OME-TIFF input
+ome_tiff_path = 'image.ome.tiff'
+segmenter = SegFlow(tile_size=512, stride=256)
+
+with OMETiffHelper(ome_tiff_path) as ome:
+    segmenter.load_numpy_arrays(nuclear=ome.get_channel_data(0))
+
+segmenter.normalize_image()
+segmenter.pad_image()
+tiles, _ = segmenter.extract_tiles()
+
+# Set image resolution and batch size
+image_mpp = 0.28
+batch_size = 64
+
+# Run segmentation with Mesmer
+mesmethod = MesmerSegmentationMethod(image_mpp)
+segmentation_tiles2 = mesmethod.run_segmentation(tiles, batch_size=batch_size)
+
+# Ingest and visualize the segmentation results
+segmenter.ingest_tile_segmentation(segmentation_tiles2)
+segmenter.crop_segmentation_padded()
+segmenter.randomize_segmentation()
+
+# Visualize the remapped segmentation
+plt.figure(figsize=(8, 8))
+plt.imshow(segmenter.segmentation)
+plt.title('Segmentation (Randomized Labels)')
+plt.axis('off')
+plt.show()
+```

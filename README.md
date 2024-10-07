@@ -45,7 +45,7 @@ plt.show()
 #### Expected Output
 
 ```
-OME-TIFF File: Processing/cropped_image.ome.tiff
+OME-TIFF File: image.ome.tiff
 Image Dimensions: (25, 2500, 2500)
 Axes: CYX
 Data Type: uint16

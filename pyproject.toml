@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seg-flow"
+version = "0.1.0"
+description = "A flexible tool for membrane and nuclear image segmentation using tile-based workflow."
+authors = [
+    { name="Jason L Weirather", email="jason.weirather@gmail.com" }
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+keywords = ["segmentation", "image-processing", "tiling", "nuclear", "membrane"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.8",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "tifffile",
+    "numpy",
+    "scikit-image<=0.19"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

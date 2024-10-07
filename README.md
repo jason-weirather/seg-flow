@@ -42,6 +42,8 @@ plt.axis('off')
 plt.show()
 ```
 
+![Image Description](docs/images/nuclear_channel.png)
+
 #### Expected Output
 
 ```
@@ -100,6 +102,8 @@ plt.axis('off')
 plt.show()
 ```
 
+![Image Description](docs/images/skw_raw_segmentation.png)
+
 ### Step 5: Randomizing Segmentation Labels
 
 ```python
@@ -113,6 +117,8 @@ plt.title('Segmentation with Randomized Labels')
 plt.axis('off')
 plt.show()
 ```
+
+![Image Description](docs/images/skw_randomized_segmentation.png)
 
 ---
 
@@ -193,3 +199,5 @@ plt.title('Segmentation (Randomized Labels)')
 plt.axis('off')
 plt.show()
 ```
+
+![Image Description](docs/images/mesmer_randomized_segmentation.png)

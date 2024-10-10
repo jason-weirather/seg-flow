@@ -3,37 +3,6 @@ from .continuoussinglechannelimage import ContinuousSingleChannelImage
 from .segmentationimage import SegmentationImage
 
 class SegFlow:
-    @classmethod
-    def randomize_segmentation(cls, segmentation_image, seed=1):
-        """
-        Randomize cell labels in the segmentation mask for better visualization.
-
-        Parameters:
-        - segmentation_image: numpy array, the segmentation mask image.
-        - seed: Random seed for reproducibility.
-        
-        Returns:
-        - segmentation_image: numpy array, the randomized segmentation mask.
-        """
-        if segmentation_image is None:
-            raise ValueError("Segmentation image must be provided before randomizing the segmentation")
-        
-        # Identify unique non-zero labels
-        unique_labels = np.unique(segmentation_image)
-        non_zero_labels = unique_labels[unique_labels > 0]
-
-        # Create a random permutation of the non-zero labels
-        randomized_labels = np.random.RandomState(seed=seed).permutation(len(non_zero_labels)) + 1  # Start labels from 1
-
-        # Create a mapping that retains zero (background)
-        label_mapping = np.zeros(unique_labels.max() + 1, dtype=np.int32)
-        label_mapping[non_zero_labels] = randomized_labels
-
-        # Apply the mapping to the segmentation image
-        segmentation_remapped = label_mapping[segmentation_image]
-        
-        return segmentation_remapped
-
     def __init__(self, tile_size=512, stride=256, average_weight=0.7, sum_weight=0.3, min_pixels=5):
         """
         Initialize the Segment class with parameters for image tiling.

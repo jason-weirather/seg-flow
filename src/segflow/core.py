@@ -1,4 +1,5 @@
 import numpy as np
+from tqdm import tqdm
 from .continuoussinglechannelimage import ContinuousSingleChannelImage
 from .segmentationimage import SegmentationImage
 
@@ -91,26 +92,6 @@ class SegFlow:
         self.tiles, self.positions = _extract_tiles(self.image_padded, self.tile_size, self.stride)
         return self.tiles, self.positions
 
-    def run_segmentation(self, tiles, segmentation_app, image_mpp=0.28, batch_size=64):
-        """
-        Run segmentation on the image tiles using the provided segmentation application.
-        
-        Parameters:
-        - tiles: Numpy array of image tiles to segment.
-        - segmentation_app: User-provided segmentation application with a `predict` method.
-        - image_mpp: Microns per pixel, used for scaling during segmentation.
-        - batch_size: Number of tiles to process in each batch.
-        """
-       
-        segmentation_tiles = []
-        for i in range(0, len(tiles), batch_size):
-            batch_tiles = tiles[i:i+batch_size]
-            preds = segmentation_app.predict(batch_tiles, image_mpp=image_mpp)
-            segmentation_tiles.extend(preds)
-            print(f"Processed batch {i // batch_size + 1}/{(len(tiles) - 1) // batch_size + 1}")
-        return np.array(segmentation_tiles)
-
-
     def combine_continuous_tiles(self, tiles):
         """
         Ingest the tiles and return the full image
@@ -136,80 +117,92 @@ class SegFlow:
         reconstructed_image /= weight_matrix
         return ContinuousSingleChannelImage(self._crop_padded(reconstructed_image))
 
-
-    def ingest_tile_segmentation(self, segmentation_tiles):
+    def ingest_tile_segmentation(self, segmentation_tiles, iou_threshold=0.5):
         """
         Ingest the segmented tiles and recombine them into a full segmentation mask, handling overlaps.
-        
+
         Parameters:
         - segmentation_tiles: Numpy array of segmented tiles.
+        - iou_threshold: Threshold for IoU to decide if segments represent the same cell.
         """
         if self.positions is None:
             raise ValueError("Tiles must be extracted first")
-        confidence_segmentation_tiles = self._calculate_high_confidence_tiles(segmentation_tiles)
-        full_overlap_mask = self._calculate_overlaps(confidence_segmentation_tiles)
-        index_coverage_tiles = self._calculate_tile_overlaps(full_overlap_mask,confidence_segmentation_tiles)
 
-        # Initialize the full segmentation mask and full score map
+        # Process tiles to get high-confidence central regions
+        segmentation_tiles = self._calculate_high_confidence_tiles(segmentation_tiles)
+
         full_segmentation_mask = np.zeros(self.image_padded.shape[:2], dtype=np.int32)
-        full_score_map = np.zeros(self.image_padded.shape[:2], dtype=np.float32)
+        max_global_label = 0
 
-        # Initialize statistics
-        total_cells_before = len(np.unique(np.concatenate([np.unique(ts) for ts in confidence_segmentation_tiles]))) - 1  # Exclude zero
-        total_pixels_overwritten = 0
-
-        for idx, (tile_segmentation, (y, x), index_coverage) in enumerate(
-                zip(confidence_segmentation_tiles, self.positions, index_coverage_tiles)
-            ):
+        for idx, (tile_segmentation, (y, x)) in tqdm(enumerate(zip(segmentation_tiles, self.positions)),desc="Processing tiles",total=len(self.positions)):
+            tile_segmentation = tile_segmentation.squeeze(axis=-1)
             y_end = y + self.tile_size
             x_end = x + self.tile_size
 
-            # Ensure tile_segmentation is 2D
-            if tile_segmentation.ndim > 2 and tile_segmentation.shape[-1] == 1:
-                tile_segmentation = tile_segmentation.squeeze(-1)
-
-            # Extract the corresponding regions from the full segmentation mask and score map
             full_mask_region = full_segmentation_mask[y:y_end, x:x_end]
-            full_score_region = full_score_map[y:y_end, x:x_end]
 
-            # Create the tile score map
-            tile_score_map = np.zeros(tile_segmentation.shape, dtype=np.float32)
-            for label, score in index_coverage.items():
-                tile_score_map[tile_segmentation == label] = score
+            tile_labels = np.unique(tile_segmentation)
+            tile_labels = tile_labels[tile_labels != 0]
 
-            # Create a mask where the tile has non-zero labels
-            tile_non_zero_mask = tile_segmentation > 0
+            for tile_label in tile_labels:
+                tile_mask = tile_segmentation == tile_label
+                overlap_mask = full_mask_region > 0
 
-            # Overwrite where tile has higher score or full mask is zero
-            overwrite_mask = (tile_score_map > full_score_region) & tile_non_zero_mask
+                overlapping_labels = np.unique(full_mask_region[tile_mask & overlap_mask])
+                overlapping_labels = overlapping_labels[overlapping_labels != 0]
 
-            # Count pixels where overwriting occurs
-            overlapping_pixels = np.sum(overwrite_mask & (full_mask_region > 0))
-            total_pixels_overwritten += overlapping_pixels
+                if overlapping_labels.size == 0:
+                    max_global_label += 1
+                    full_mask_region[tile_mask] = max_global_label
+                else:
+                    ious = []
+                    for overlap_label in overlapping_labels:
+                        full_mask_label_mask = full_mask_region == overlap_label
+                        iou = self._calculate_iou(tile_mask, full_mask_label_mask)
+                        ious.append((iou, overlap_label))
 
-            # Update the full segmentation mask and score map
-            full_mask_region[overwrite_mask] = tile_segmentation[overwrite_mask]
-            full_score_region[overwrite_mask] = tile_score_map[overwrite_mask]
+                    best_iou, best_overlap_label = max(ious, key=lambda x: x[0])
 
-            # Update the regions back to the full mask and score map
+                    if best_iou >= iou_threshold:
+                        # Merge labels
+                        full_mask_region[tile_mask] = best_overlap_label
+                    else:
+                        max_global_label += 1
+                        full_mask_region[tile_mask] = max_global_label
+
             full_segmentation_mask[y:y_end, x:x_end] = full_mask_region
-            full_score_map[y:y_end, x:x_end] = full_score_region
 
-            print(f"Recombined tile {idx + 1}/{len(confidence_segmentation_tiles)}", end='\r')
-        print("\nRecombination complete.")
+            #print(f"Processed tile {idx + 1}/{len(segmentation_tiles)}", end='\r')
+        #print("\nRecombination complete.")
 
-        # Calculate total_cells_after
-        unique_labels_after = np.unique(full_segmentation_mask)
-        unique_labels_after = unique_labels_after[unique_labels_after != 0]
-        total_cells_after = len(unique_labels_after)
+        # Optional: Relabel connected components
+        from skimage.measure import label
 
-        # Print statistics
-        print(f"Total cells before recombination: {total_cells_before}")
-        print(f"Total pixels overwritten: {total_pixels_overwritten}")
-        print(f"Total cells after recombination: {total_cells_after}")
-        #self.segmentation_padded = full_segmentation_mask
-        return SegmentationImage(self._crop_padded(full_segmentation_mask))
-    
+        full_segmentation_mask = label(full_segmentation_mask)
+
+        # Crop the padded segmentation mask
+        final_segmentation_mask = self._crop_padded(full_segmentation_mask)
+
+        return SegmentationImage(final_segmentation_mask)
+
+
+    def _calculate_iou(self, mask1, mask2):
+        """
+        Calculate the Intersection-over-Union (IoU) of two boolean masks.
+
+        Parameters:
+        - mask1: First boolean mask.
+        - mask2: Second boolean mask.
+
+        Returns:
+        - IoU value.
+        """
+        intersection = np.logical_and(mask1, mask2).sum()
+        union = np.logical_or(mask1, mask2).sum()
+        if union == 0:
+            return 0.0
+        return intersection / union
+
 
     def _calculate_high_confidence_tiles(self, segmentation_tiles):
         """

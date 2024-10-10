@@ -1,138 +1,39 @@
 import numpy as np
-import tifffile
-import xml.etree.ElementTree as ET
-
-class OMETiffHelper:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-    def __init__(self, path):
-        """
-        Initialize the OMETiffHelper class with the given OME-TIFF file path.
-        
-        Parameters:
-        - path: Path to the OME-TIFF file.
-        """
-        self.path = path
-        self.tif = tifffile.TiffFile(path)
-        self.channels_info = self._extract_channel_info()
-        self.image_info = self._extract_image_info()
-
-    def _extract_channel_info(self):
-        """
-        Extract channel information from the OME-TIFF metadata, including channel ID and name.
-        Returns a list of dictionaries containing channel details.
-        """
-        metadata = self.tif.ome_metadata
-        channels_info = []
-        if metadata:
-            root = ET.fromstring(metadata)
-            namespaces = {'ome': 'http://www.openmicroscopy.org/Schemas/OME/2016-06'}
-
-            for image in root.findall('ome:Image', namespaces):
-                pixels = image.find('ome:Pixels', namespaces)
-                for channel in pixels.findall('ome:Channel', namespaces):
-                    channel_id = channel.get('ID')
-                    channel_name = channel.get('Name') if channel.get('Name') else "Unnamed Channel"
-                    channels_info.append({'ID': channel_id, 'Name': channel_name})
-        return channels_info
-
-    def _extract_image_info(self):
-        """
-        Extract general image information such as dimensions, axes type, data type, and pixel size (X and Y).
-        Returns a dictionary containing the image information.
-        """
-        if self.tif.series:
-            series = self.tif.series[0]
-            shape = series.shape
-            dtype = series.dtype
-            axes = series.axes
-            metadata = self.tif.ome_metadata
-            pixel_size_x = None
-            pixel_size_y = None
-            pixel_size_unit = None
-            if metadata:
-                root = ET.fromstring(metadata)
-                namespaces = {'ome': 'http://www.openmicroscopy.org/Schemas/OME/2016-06'}
-                pixels = root.find('.//ome:Pixels', namespaces)
-                if pixels is not None:
-                    pixel_size_x = pixels.get('PhysicalSizeX')
-                    pixel_size_y = pixels.get('PhysicalSizeY')
-                    pixel_size_unit = pixels.get('PhysicalSizeXUnit')
-            return {
-                'Dimensions': shape,
-                'Axes': axes,
-                'Data Type': dtype,
-                'Pixel Size X': pixel_size_x,
-                'Pixel Size Y': pixel_size_y,
-                'Pixel Size Unit': pixel_size_unit
-            }
-        return None
-
-    def get_channel_data(self, channel_index):
-        """
-        Get the image data for the specified channel index.
-        
-        Parameters:
-        - channel_index: Index of the channel to extract.
-        
-        Returns:
-        - Numpy array representing the specified channel.
-        """
-        series = self.tif.series[0]
-        return series.pages[channel_index].asarray()
-
-    def __str__(self):
-        """
-        Generate a string representation for printing channel and image information.
-        
-        Returns:
-        - String with formatted details about the image.
-        """
-        if not self.channels_info:
-            return "No OME metadata found in the TIFF file."
-        info = [f"OME-TIFF File: {self.path}",
-                f"Image Dimensions: {self.image_info['Dimensions']}",
-                f"Axes: {self.image_info['Axes']}",
-                f"Data Type: {self.image_info['Data Type']}",
-                f"Pixel Size X: {self.image_info['Pixel Size X']} {self.image_info['Pixel Size Unit']}",
-                f"Pixel Size Y: {self.image_info['Pixel Size Y']} {self.image_info['Pixel Size Unit']}",
-                f"Number of Channels: {len(self.channels_info)}"]
-        for idx, channel in enumerate(self.channels_info, start=1):
-            info.append(f"  Channel {idx}: {channel['Name']} (ID: {channel['ID']})")
-        return "\n".join(info)
-
-    def _repr_html_(self):
-        """
-        Generate an HTML representation for displaying image information in Jupyter Notebook.
-        
-        Returns:
-        - HTML-formatted string with details about the image.
-        """
-        if not self.channels_info:
-            return "<p>No OME metadata found in the TIFF file.</p>"
-        html = [f"<h4>OME-TIFF File: {self.path}</h4>",
-                f"<p>Image Dimensions: {self.image_info['Dimensions']}</p>",
-                f"<p>Axes: {self.image_info['Axes']}</p>",
-                f"<p>Data Type: {self.image_info['Data Type']}</p>",
-                f"<p>Pixel Size X: {self.image_info['Pixel Size X']} {self.image_info['Pixel Size Unit']}</p>",
-                f"<p>Pixel Size Y: {self.image_info['Pixel Size Y']} {self.image_info['Pixel Size Unit']}</p>",
-                f"<p>Number of Channels: {len(self.channels_info)}</p>",
-                "<ul>"]
-        for channel in self.channels_info:
-            html.append(f"<li>{channel['Name']} (ID: {channel['ID']})</li>")
-        html.append("</ul>")
-        return "".join(html)
-
-    def close(self):
-        """
-        Close the TIFF file to free resources.
-        """
-        self.tif.close()
+from .continuoussinglechannelimage import ContinuousSingleChannelImage
+from .segmentationimage import SegmentationImage
 
 class SegFlow:
+    @classmethod
+    def randomize_segmentation(cls, segmentation_image, seed=1):
+        """
+        Randomize cell labels in the segmentation mask for better visualization.
+
+        Parameters:
+        - segmentation_image: numpy array, the segmentation mask image.
+        - seed: Random seed for reproducibility.
+        
+        Returns:
+        - segmentation_image: numpy array, the randomized segmentation mask.
+        """
+        if segmentation_image is None:
+            raise ValueError("Segmentation image must be provided before randomizing the segmentation")
+        
+        # Identify unique non-zero labels
+        unique_labels = np.unique(segmentation_image)
+        non_zero_labels = unique_labels[unique_labels > 0]
+
+        # Create a random permutation of the non-zero labels
+        randomized_labels = np.random.RandomState(seed=seed).permutation(len(non_zero_labels)) + 1  # Start labels from 1
+
+        # Create a mapping that retains zero (background)
+        label_mapping = np.zeros(unique_labels.max() + 1, dtype=np.int32)
+        label_mapping[non_zero_labels] = randomized_labels
+
+        # Apply the mapping to the segmentation image
+        segmentation_remapped = label_mapping[segmentation_image]
+        
+        return segmentation_remapped
+
     def __init__(self, tile_size=512, stride=256, average_weight=0.7, sum_weight=0.3, min_pixels=5):
         """
         Initialize the Segment class with parameters for image tiling.
@@ -158,8 +59,6 @@ class SegFlow:
         self.pad_right = None
         self.tiles = None
         self.positions = None
-        self.segmentation_padded = None
-        self.segmentation = None
 
     def load_numpy_arrays(self, nuclear, membrane=None):
         """
@@ -242,6 +141,33 @@ class SegFlow:
             print(f"Processed batch {i // batch_size + 1}/{(len(tiles) - 1) // batch_size + 1}")
         return np.array(segmentation_tiles)
 
+
+    def combine_continuous_tiles(self, tiles):
+        """
+        Ingest the tiles and return the full image
+        """
+        full_image_shape = self.image_padded.shape[:2]
+        reconstructed_image = np.zeros(full_image_shape, dtype=tiles[0].dtype)
+        weight_matrix = np.zeros(full_image_shape, dtype=np.float32)
+
+        # Create a weighting window to reduce edge effects
+        window = np.outer(np.hanning(self.tile_size), np.hanning(self.tile_size))
+        window = window / window.max()
+
+        for tile, (row_start, col_start) in zip(tiles, self.positions):
+            row_end = row_start + self.tile_size
+            col_end = col_start + self.tile_size
+
+            reconstructed_image[row_start:row_end, col_start:col_end] += tile * window
+            weight_matrix[row_start:row_end, col_start:col_end] += window
+
+        # Avoid division by zero
+        weight_matrix[weight_matrix == 0] = 1
+
+        reconstructed_image /= weight_matrix
+        return ContinuousSingleChannelImage(self._crop_padded(reconstructed_image))
+
+
     def ingest_tile_segmentation(self, segmentation_tiles):
         """
         Ingest the segmented tiles and recombine them into a full segmentation mask, handling overlaps.
@@ -312,8 +238,8 @@ class SegFlow:
         print(f"Total cells before recombination: {total_cells_before}")
         print(f"Total pixels overwritten: {total_pixels_overwritten}")
         print(f"Total cells after recombination: {total_cells_after}")
-        self.segmentation_padded = full_segmentation_mask
-
+        #self.segmentation_padded = full_segmentation_mask
+        return SegmentationImage(self._crop_padded(full_segmentation_mask))
     
 
     def _calculate_high_confidence_tiles(self, segmentation_tiles):
@@ -471,52 +397,27 @@ class SegFlow:
         print("Index coverage (with combined score) for each tile calculated.")
         return index_coverage_tiles
 
-    def crop_segmentation_padded(self):
+
+    def _crop_padded(self,padded_image_to_crop):
         """
         Remove the padding from the full segmentation mask to obtain the final segmentation mask.
         """
-        if self.segmentation_padded is None:
-            raise ValueError("Must ingest the segmented tiles to get the padded segmentation first.")
+        if self.image_padded is None:
+            raise ValueError("Must have padded image first.")
         # Step 11: Remove padding to obtain the final segmentation mask
 
         # Crop the full segmentation mask to remove the padding
-        cropped_segmentation_mask = self.segmentation_padded[self.pad_top:-self.pad_bottom, self.pad_left:-self.pad_right]
+        cropped_segmentation_mask = padded_image_to_crop[self.pad_top:-self.pad_bottom, self.pad_left:-self.pad_right]
 
         # Handle edge cases where padding amounts are zero
         if self.pad_bottom == 0:
-            cropped_segmentation_mask = self.segmentation_padded[self.pad_top:, self.pad_left:-self.pad_right]
+            cropped_segmentation_mask = padded_image_to_crop[self.pad_top:, self.pad_left:-self.pad_right]
         if self.pad_right == 0:
             cropped_segmentation_mask = cropped_segmentation_mask[:, self.pad_left:]
 
         # Print dimensions of the cropped mask
         print(f"Cropped segmentation mask size: height={cropped_segmentation_mask.shape[0]}, width={cropped_segmentation_mask.shape[1]}")
-        self.segmentation = cropped_segmentation_mask
-
-    def randomize_segmentation(self, seed=1):
-        """
-        Randomize cell labels in the segmentation mask for better visualization.
-        
-        Parameters:
-        - seed: Random seed for reproducibility.
-        """
-        if self.segmentation is None:
-            raise ValueError("Must crop to a segmentation before randomizing the segmentation")
-        # Step 13: Randomize cell labels for better visualization (optional)
-
-        # Identify unique non-zero labels
-        unique_labels = np.unique(self.segmentation)
-        non_zero_labels = unique_labels[unique_labels > 0]
-
-        # Create a random permutation of the non-zero labels
-        randomized_labels = np.random.RandomState(seed=seed).permutation(len(non_zero_labels)) + 1  # Start labels from 1
-
-        # Create a mapping that retains zero (background)
-        label_mapping = np.zeros(unique_labels.max() + 1, dtype=np.int32)
-        label_mapping[non_zero_labels] = randomized_labels
-
-        # Apply the mapping to the segmentation image
-        segmentation_remapped = label_mapping[self.segmentation]
-        self.segmentation = segmentation_remapped
+        return cropped_segmentation_mask
 
 def _extract_tiles(image, tile_size, stride):
     """

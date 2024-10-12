@@ -2,7 +2,7 @@ import numpy as np
 from tqdm import tqdm
 from skimage.measure import label
 
-class TileCombiner:
+class SegmentationTileCombiner(TileCombiner):
     def __init__(self, tile_size=512, average_weight=0.7, sum_weight=0.3, min_pixels=5):
         self.tile_size = tile_size
         self.average_weight = average_weight

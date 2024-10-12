@@ -2,6 +2,7 @@ import numpy as np
 from skimage import filters, morphology, measure, segmentation, exposure, feature, util
 from scipy import ndimage as ndi
 
+
 from .generic_segmentation_method import GenericSegmentationMethod
 
 class SKWSegmentationMethod(GenericSegmentationMethod):
@@ -25,7 +26,7 @@ class SKWSegmentationMethod(GenericSegmentationMethod):
         self.log_sigma = log_sigma
         self.min_distance = min_distance if min_distance is not None else int(5 * (image_mpp / 0.28))
 
-    def run_segmentation(self, tiles, batch_size=64):
+    def _run_segmentation(self, tiles, batch_size=64):
         """
         Perform SKWS (Scikit-image Kernel [Gaussian, LoG, Sobel] Watershed) Segmentation on a batch of tiles.
         

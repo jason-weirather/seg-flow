@@ -24,7 +24,7 @@ class EntropyImageProcessingMethod(GenericImageProcessingMethod):
         self.min_value = None
         self.max_value = None
 
-    def run_image_processing(self, tiles, batch_size=64):
+    def _run_image_processing(self, tiles, batch_size=64):
         """
         Perform entropy-based segmentation on the tiles.
 

@@ -1,6 +1,6 @@
 import numpy as np
 from skimage.filters import threshold_otsu
-from .segmentationimage import SegmentationImage
+from .segmentation_image import SegmentationImage
 
 class ContinuousSingleChannelImage(np.ndarray):
     def __new__(cls, input_array):

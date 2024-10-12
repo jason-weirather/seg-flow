@@ -1,7 +1,8 @@
 from .core import SegFlow
 from .ometiffhelper import OMETiffHelper
 from ._version import __version__
-from .segmentationimage import SegmentationImage
-from .continuoussinglechannelimage import ContinuousSingleChannelImage
+from .full_image import SegmentationImage
+from .full_image import ContinuousSingleChannelImage
+from .tiled_image import TiledImage, SegmentationTiledImage
 
-__all__ = [OMETiffHelper, SegFlow, SegmentationImage, ContinuousSingleChannelImage, __version__]
+__all__ = [OMETiffHelper, SegFlow, SegmentationImage, ContinuousSingleChannelImage, TiledImage, SegmentationTiledImage, __version__]

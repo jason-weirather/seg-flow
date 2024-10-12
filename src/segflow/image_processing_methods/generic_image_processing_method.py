@@ -17,6 +17,7 @@ class GenericImageProcessingMethod:
         return TiledImage.from_tiled_array(
             generated_tiles,
             tiles.positions,
+            tiles.original_shape,
             tiles.pad_top,
             tiles.pad_bottom,
             tiles.pad_left,

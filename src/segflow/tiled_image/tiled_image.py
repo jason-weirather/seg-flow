@@ -50,21 +50,20 @@ class TiledImage(np.ndarray):
             input_image.shape[0] + obj.pad_top + obj.pad_bottom,
             input_image.shape[1] + obj.pad_left + obj.pad_right
         )
-        obj.original_shape = input_image.shape
         obj.positions = positions
+        obj.original_shape = input_image.shape
         obj.tile_size = tile_size
-        obj.stride = stride
-        obj.min_padding = min_padding
         return obj
 
     @classmethod
-    def from_tiled_array(cls, tiled_array, positions, pad_top, pad_bottom, pad_left, pad_right):
+    def from_tiled_array(cls, tiled_array, positions, original_shape, pad_top, pad_bottom, pad_left, pad_right):
         """
         Factory method to create a TiledImage from an existing tiled array.
 
         Parameters:
         - tiled_array: Numpy array representing the tiled image (n_tiles, height, width, m_channels).
         - positions: List of positions where each tile starts in the padded image.
+        - original_image_shape: The size (h,w) of the original unpadded image.
         - pad_top: Amount of padding added to the top of the original image.
         - pad_bottom: Amount of padding added to the bottom of the original image.
         - pad_left: Amount of padding added to the left of the original image.
@@ -75,6 +74,7 @@ class TiledImage(np.ndarray):
         """
         obj = tiled_array.view(cls)
         obj.positions = positions
+        obj.original_shape = original_shape
         obj.pad_top = pad_top
         obj.pad_bottom = pad_bottom
         obj.pad_left = pad_left
@@ -82,13 +82,8 @@ class TiledImage(np.ndarray):
         obj.tile_size = tiled_array.shape[1]  # Assuming all tiles have the same height and width
 
         # Find the furthest extent in both dimensions based on positions
-        max_y = max(y for y, _ in positions) + obj.tile_size
-        max_x = max(x for _, x in positions) + obj.tile_size
-
-        # Calculate the stride based on positions
-        strides = [(positions[i+1][0] - positions[i][0], positions[i+1][1] - positions[i][1])
-                   for i in range(len(positions) - 1)]
-        obj.stride = next((stride[0] for stride in strides if stride[0] != 0), obj.tile_size)
+        max_y = obj.original_shape[0] + pad_top + pad_bottom
+        max_x = obj.original_shape[1] + pad_left + pad_right
 
         if obj.stride == 0:
             raise ValueError("Calculated stride is zero. Check the positions provided.")
@@ -97,12 +92,6 @@ class TiledImage(np.ndarray):
         obj.padded_shape = (
             max_y,
             max_x
-        )
-
-        # Original shape is calculated by removing padding from padded shape
-        obj.original_shape = (
-            obj.padded_shape[0] - pad_top - pad_bottom,
-            obj.padded_shape[1] - pad_left - pad_right
         )
 
         return obj
@@ -244,7 +233,7 @@ class TiledImage(np.ndarray):
         obj.padded_shape = self.padded_shape
         return obj
 
-    def combine_tiles(self, crop=True):
+    def combine_tiles2(self, crop=True):
         """
         Combine the overlapping tiles to create a complete image by averaging overlapping regions.
 
@@ -297,3 +286,111 @@ class TiledImage(np.ndarray):
 
         return ContinuousSingleChannelImage(reconstructed_image)
 
+
+    def reform_image_overwrite(self, crop=True):
+        """
+        Reform the image using overwriting reconstruction without any averaging or other operations.
+
+        Parameters:
+        - crop: Boolean, if True (default), crops the image to the original size, otherwise returns the full padded image.
+
+        Returns:
+        - Numpy array representing the reconstructed image.
+        """
+        return ContinuousSingleChannelImage(self._combine_tiles_overwrite(crop))
+
+    def combine_tiles(self, crop=True, method="average"):
+        """
+        Combine the overlapping tiles to create a complete image by averaging overlapping regions or overwriting.
+
+        Parameters:
+        - crop: Boolean, if True (default), crops the image to the original size, otherwise returns the full padded image.
+        - method: String, combining method - "average" (default) or "overwrite".
+
+        Returns:
+        - Numpy array representing the reconstructed image.
+        """
+        if self.positions is None:
+            raise ValueError("Positions are not set. Make sure the TiledImage was created properly with the correct positions.")
+
+        if method == "average":
+            return ContinuousSingleChannelImage(self._combine_tiles_average(crop))
+        elif method == "overwrite":
+            return ContinuousSingleChannelImage(self._combine_tiles_overwrite(crop))
+        else:
+            raise ValueError(f"Invalid method '{method}'. Choose from 'average' or 'overwrite'.")
+
+    def _combine_tiles_average(self, crop):
+        """
+        Combine tiles by averaging overlapping regions.
+        """
+        # Determine if the image is single-channel or multi-channel based on the tile shape
+        is_single_channel = self.shape[-1] == 1 if self.ndim == 4 else True
+
+        # Initialize the reconstructed image and weight matrix
+        if is_single_channel:
+            reconstructed_image = np.zeros((self.padded_shape[0], self.padded_shape[1]), dtype=np.float32)
+            weight_matrix = np.zeros((self.padded_shape[0], self.padded_shape[1]), dtype=np.float32)
+        else:
+            reconstructed_image = np.zeros((self.padded_shape[0], self.padded_shape[1], self.shape[-1]), dtype=np.float32)
+            weight_matrix = np.zeros((self.padded_shape[0], self.padded_shape[1], 1), dtype=np.float32)
+
+        # Iterate through each tile and add it to the reconstructed image with appropriate weights
+        for tile, (y, x) in zip(self, self.positions):
+            tile_height, tile_width = tile.shape[0:2]
+            
+            if is_single_channel:
+                reconstructed_image[y:y+tile_height, x:x+tile_width] += tile  # Single channel, no need to squeeze
+                weight_matrix[y:y+tile_height, x:x+tile_width] += 1
+            else:
+                reconstructed_image[y:y+tile_height, x:x+tile_width, :] += tile
+                weight_matrix[y:y+tile_height, x:x+tile_width, :] += 1
+
+        # Avoid division by zero
+        weight_matrix[weight_matrix == 0] = 1
+
+        # Average the overlapping areas
+        if is_single_channel:
+            reconstructed_image /= weight_matrix
+        else:
+            reconstructed_image /= weight_matrix
+
+        # Crop the padded area to return the original image size if crop is True
+        if crop:
+            reconstructed_image = reconstructed_image[
+                self.pad_top:self.padded_shape[0] - self.pad_bottom,
+                self.pad_left:self.padded_shape[1] - self.pad_right
+            ]
+
+        return reconstructed_image
+
+    def _combine_tiles_overwrite(self, crop):
+        """
+        Combine tiles by overwriting values without averaging.
+        """
+        # Determine if the image is single-channel or multi-channel based on the tile shape
+        is_single_channel = self.shape[-1] == 1 if self.ndim == 4 else True
+
+        # Initialize the reconstructed image
+        if is_single_channel:
+            reconstructed_image = np.zeros((self.padded_shape[0], self.padded_shape[1]), dtype=np.float32)
+        else:
+            reconstructed_image = np.zeros((self.padded_shape[0], self.padded_shape[1], self.shape[-1]), dtype=np.float32)
+
+        # Iterate through each tile and overwrite it in the reconstructed image
+        for tile, (y, x) in zip(self, self.positions):
+            tile_height, tile_width = tile.shape[0:2]
+            
+            if is_single_channel:
+                reconstructed_image[y:y+tile_height, x:x+tile_width] = tile  # Overwrite
+            else:
+                reconstructed_image[y:y+tile_height, x:x+tile_width, :] = tile
+
+        # Crop the padded area to return the original image size if crop is True
+        if crop:
+            reconstructed_image = reconstructed_image[
+                self.pad_top:self.padded_shape[0] - self.pad_bottom,
+                self.pad_left:self.padded_shape[1] - self.pad_right
+            ]
+
+        return reconstructed_image

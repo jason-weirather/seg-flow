@@ -42,7 +42,7 @@ class SegmentationTiledImage(TiledImage):
         return obj
 
     @classmethod
-    def from_tiled_array(cls, tiled_array, positions, pad_top, pad_bottom, pad_left, pad_right):
+    def from_tiled_array(cls, tiled_array, positions, original_shape, pad_top, pad_bottom, pad_left, pad_right):
         """
         Factory method to create a SegmentationTiledImage from a numpy array, positions, and padding parameters
 
@@ -50,9 +50,21 @@ class SegmentationTiledImage(TiledImage):
         - SegmentationTiledImage instance.
         """
         # Call the base class method to create the tiled image
-        obj = super(SegmentationTiledImage, cls).from_tiled_array(tiled_array, positions, pad_top, pad_bottom, pad_left, pad_right)
+        obj = super(SegmentationTiledImage, cls).from_tiled_array(tiled_array, positions, original_shape, pad_top, pad_bottom, pad_left, pad_right)
         # Add any segmentation-specific initialization here, if needed
         return obj
+
+    def reform_image_overwrite(self, crop=True):
+        """
+	Reform the image using overwriting reconstruction without any averaging or other operations.
+
+        Parameters:
+        - crop: Boolean, if True (default), crops the image to the original size, otherwise returns the full padded image.
+
+        Returns:
+        - Numpy array representing the reconstructed image.
+        """
+        return SegmentationImage(self._combine_tiles_overwrite(crop))
 
     def combine_tiles(self, iou_threshold=0.5, crop=True):
         """
@@ -198,7 +210,7 @@ class SegmentationTiledImage(TiledImage):
 
         confidence_segmentation_tiles = np.array(confidence_segmentation_tiles)
         
-        output_image = SegmentationTiledImage.from_tiled_array(confidence_segmentation_tiles, self.positions, self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
+        output_image = SegmentationTiledImage.from_tiled_array(confidence_segmentation_tiles, self.positions, self.original_shape, self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
 
         if in_place is True:
             self = output_image

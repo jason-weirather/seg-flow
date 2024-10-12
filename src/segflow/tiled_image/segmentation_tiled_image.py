@@ -146,7 +146,7 @@ class SegmentationTiledImage(TiledImage):
             return 0.0
         return intersection / union
 
-    def high_confidence_tile_filter(self, margin_size_px):
+    def high_confidence_tile_filter(self, margin_size_px, in_place = False):
         """
         Process segmentation tiles to extract high-confidence central regions and adjust labels to ensure uniqueness.
         
@@ -197,4 +197,10 @@ class SegmentationTiledImage(TiledImage):
             confidence_segmentation_tiles.append(tile_segmentation_adjusted)
 
         confidence_segmentation_tiles = np.array(confidence_segmentation_tiles)
-        return SegmentationTiledImage.from_tiled_array(confidence_segmentation_tiles, self.positions, self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
+        
+        output_image = SegmentationTiledImage.from_tiled_array(confidence_segmentation_tiles, self.positions, self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
+
+        if in_place is True:
+            self = output_image
+
+        return output_image

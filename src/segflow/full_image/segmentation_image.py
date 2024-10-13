@@ -249,13 +249,14 @@ class SegmentationImage(np.ndarray):
                 bbox_y_max = min(self.shape[0], y_min + self.bbox_size[0])
                 bbox_x_max = min(self.shape[1], x_min + self.bbox_size[1])
                 patch = self[y_min:bbox_y_max, x_min:bbox_x_max]
-                cell_size_px = np.sum(patch == region.label)
+                cell_area_px = np.sum(np.asarray(patch == region.label))
+
 
                 # Store metadata
                 centroids[region.label] = {
                     'centroid': (centroid_y, centroid_x),
+                    'region_label': region.label,
                     'bbox_position': (y_min, x_min),
-                    'cell_size_px': cell_size_px,
                     'on_edge': on_edge
                 }
 
@@ -322,13 +323,17 @@ class SegmentationImage(np.ndarray):
         else:
             raise ValueError(f"Invalid method '{method}'. Choose from 'centroid_overlap', 'all_in', 'any_in'.")
         
-        # We won't pass the bbox_size because we are drastically changing the segmentation
-        return self.__class__(new_image)
+        new_instance = self.__class__(new_image)
+        new_instance._initialize_attributes(self)
+        return new_instance
 
     @property
     def segment_patches(self):
+        from ..tiled_image import SegmentationPatchTiledImage
         if self._bbox_size is None:
             raise ValueError("Bounding box size must be set before accessing segment patches.")
+        return SegmentationPatchTiledImage.from_image(self,bbox_size=self.bbox_size)
+        from ..tiled_image import SegmentationTiledImage
 
         current_checksum = self._calculate_checksum()
         if self._segment_patches_cache is not None and current_checksum == self._checksum:
@@ -336,14 +341,13 @@ class SegmentationImage(np.ndarray):
 
         centroids = self.centroids
         bbox_height, bbox_width = self._bbox_size
-        n_patches = max(centroids.keys(), default=0) + 1
+        n_patches = len(centroids.keys())
 
         # Initialize an array for patches
         patches_array = np.zeros((n_patches, bbox_height, bbox_width), dtype=self.dtype)
         image_height, image_width = self.shape
 
-        for label_value in sorted(centroids.keys()):
-            centroid_info = centroids[label_value]
+        for idx, (label_value, centroid_info) in tqdm(enumerate(centroids.items()),desc="Building patches",total=len(centroids)):
             y_min, x_min = centroid_info['bbox_position']
 
             # Calculate bounding box coordinates
@@ -353,7 +357,16 @@ class SegmentationImage(np.ndarray):
             # Extract the patch
             patch = self[y_min:y_max, x_min:x_max]
 
-            patches_array[label_value] = patch
+            patches_array[idx,:,:] = patch
 
-        self._segment_patches_cache = patches_array.astype(self.dtype)
-        return patches_array
+
+        self._segment_patches_cache = SegmentationTiledImage.from_tiled_array(
+            np.array(patches_array, dtype=self.dtype),
+            positions = [x['bbox_position'] for x in centroids.values()],
+            original_shape = self.shape,
+            pad_top = 0,
+            pad_bottom = 0,
+            pad_left = 0,
+            pad_right = 0
+        )
+        return self._segment_patches_cache

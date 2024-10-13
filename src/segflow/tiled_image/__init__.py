@@ -1,2 +1,3 @@
 from .tiled_image import TiledImage
 from .segmentation_tiled_image import SegmentationTiledImage
+from .segmentation_patch_tiled_image import SegmentationPatchTiledImage

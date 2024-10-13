@@ -15,8 +15,8 @@ class SegmentationTiledImage(TiledImage):
         Create a new SegmentationTiledImage instance by copying an existing TiledImage.
         """
         # Ensure the input image is a SegmentationTiledImage or TiledImage
-        if not isinstance(input_image, TiledImage):
-            raise ValueError("input_image must be an instance of TiledImage or SegmentationTiledImage.")
+        if not isinstance(input_image, SegmentationTiledImage):
+            raise ValueError("input_image must be an instance of SegmentationTiledImage.")
         
         # Create the new instance as a view of the input_image
         obj = input_image.view(cls)

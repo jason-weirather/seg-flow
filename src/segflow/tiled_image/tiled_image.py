@@ -373,9 +373,9 @@ class TiledImage(np.ndarray):
 
         # Initialize the reconstructed image
         if is_single_channel:
-            reconstructed_image = np.zeros((self.padded_shape[0], self.padded_shape[1]), dtype=np.float32)
+            reconstructed_image = np.zeros((self.padded_shape[0], self.padded_shape[1]), dtype=self.dtype)
         else:
-            reconstructed_image = np.zeros((self.padded_shape[0], self.padded_shape[1], self.shape[-1]), dtype=np.float32)
+            reconstructed_image = np.zeros((self.padded_shape[0], self.padded_shape[1], self.shape[-1]), dtype=self.dtype)
 
         # Iterate through each tile and overwrite it in the reconstructed image
         for tile, (y, x) in zip(self, self.positions):

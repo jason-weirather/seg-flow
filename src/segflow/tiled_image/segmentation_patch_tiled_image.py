@@ -4,6 +4,7 @@ from scipy.ndimage import binary_fill_holes
 from tqdm import tqdm
 from copy import deepcopy, copy
 import numpy as np
+import sys
 
 from .segmentation_tiled_image import SegmentationTiledImage
 from ..full_image import SegmentationImage
@@ -359,6 +360,9 @@ class SegmentationPatchTiledImage(SegmentationTiledImage):
         For each patch, we flood-fill the region_label and then check which other labels overlap
         with this filled mask. Any overlapping label is considered circumscribed.
         
+
+        You should not run isolate_center_labels() before running this, because this requires having all the patch labels present.
+
         Returns:
         - circumscribed_labels (set): A set of integers corresponding to labels that are circumscribed.
         """

@@ -31,59 +31,96 @@ class SegmentationPatchTiledImage(SegmentationTiledImage):
     @classmethod
     def from_image(cls, input_image, bbox_size):
         """
-        Factory method to create a SegmentationPatchTiledImage from a fresh SegmentationImage image.
+        Factory method to create a SegmentationPatchTiledImage from a SegmentationImage.
 
         Parameters:
-        - input_image: Numpy array of the segmented image (height, width).
-        
+        - input_image: A SegmentationImage instance (2D labeled array).
+        - bbox_size: A tuple of (size_y, size_x) for bounding box size of each patch.
+
         Returns:
-        - SegmentationPatchTiledImage instance.
-        """        
+        - SegmentationPatchTiledImage instance with one patch for each labeled (non-zero) segment.
+        """
         # Ensure the input image is a SegmentationImage
         if not isinstance(input_image, SegmentationImage):
             raise ValueError("input_image must be an instance of SegmentationImage.")
 
-        saved_bbox_size = input_image.bbox_size
-        input_image.bbox_size = bbox_size
+        # Start from the input image's centroid property
         centroids = input_image.centroids
-        centroid_list = deepcopy([x for x in centroids.values()])
-        if saved_bbox_size is not None:
-            input_image.bbox_size = saved_bbox_size
 
         bbox_height, bbox_width = bbox_size
-        n_patches = len(centroids.keys())
+        half_height = bbox_height // 2
+        half_width = bbox_width // 2
 
-        # Initialize an array for patches
+        n_patches = len(centroids)
         patches_array = np.zeros((n_patches, bbox_height, bbox_width), dtype=input_image.dtype)
+        patch_descriptions = []
         image_height, image_width = input_image.shape
 
-        for idx, (label_value, centroid_info) in tqdm(enumerate(centroids.items()),desc="Building patches",total=len(centroids)):
-            y_min, x_min = centroid_info['bbox_position']
+        # Iterate through each region to extract patches and metadata
+        for idx, (region_label, (centroid_y, centroid_x)) in tqdm(enumerate(centroids.items()), desc="Building patches:", total=n_patches):
 
             # Calculate bounding box coordinates
-            y_max = min(y_min + bbox_height, image_height)
-            x_max = min(x_min + bbox_width, image_width)
+            y_min = centroid_y - half_height
+            y_max = centroid_y + half_height
+            x_min = centroid_x - half_width
+            x_max = centroid_x + half_width
 
-            # Extract the patch
-            patch = input_image[y_min:y_max, x_min:x_max]
+            # Initialize edge indicators
+            on_edge = {'top': False,'bottom': False,'left': False,'right': False}
 
-            patches_array[idx,:,:] = patch
+            # Adjust coordinates if they are out of bounds and set the on_edge parameters
+            if y_min < 0:
+                    on_edge['top'] = True
+                    y_min = 0
+                    y_max = bbox_size[0]
+            if y_max > input_image.shape[0]:
+                    on_edge['bottom'] = True
+                    y_max = input_image.shape[0]
+                    y_min = input_image.shape[0] - bbox_size[0]
+            if x_min < 0:
+                    on_edge['left'] = True
+                    x_min = 0
+                    x_max = bbox_size[1]
+            if x_max > input_image.shape[1]:
+                    on_edge['right'] = True
+                    x_max = input_image.shape[1]
+                    x_min = input_image.shape[1] - bbox_size[1]
 
+            # Might want to ensure that the bounding box has the correct size,
+            # but we would be in trouble if it didn't so lets let it fail hard if its off
+            #y_min = max(y_min, 0)
+            #y_max = min(y_max, input_image.shape[0])
+            #x_min = max(x_min, 0)
+            #x_max = min(x_max, input_image.shape[1])
+
+            # Count pixels within the bounding box that belong to the current label
+            bbox_y_max = y_min + bbox_size[0]
+            bbox_x_max = x_min + bbox_size[1]
+            patch = input_image[y_min:bbox_y_max, x_min:bbox_x_max]
+
+            patches_array[idx,:,:] = patch.copy()
+
+            # Store metadata
+            patch_descriptions.append({
+                'centroid': (centroid_y, centroid_x),
+                'region_label': region_label,
+                'bbox_position': (y_min, x_min),
+                'on_edge': on_edge
+            })
 
         # Call the base class method to create the tiled image
         obj = super(SegmentationPatchTiledImage, cls).from_tiled_array(
-            np.array(patches_array, dtype=input_image.dtype),
-            positions = [x['bbox_position'] for x in centroids.values()],
-            original_shape = input_image.shape,
-            pad_top = 0,
-            pad_bottom = 0,
-            pad_left = 0,
-            pad_right = 0
+            patches_array,
+            positions=[desc['bbox_position'] for desc in patch_descriptions],
+            original_shape=input_image.shape,
+            pad_top=0,
+            pad_bottom=0,
+            pad_left=0,
+            pad_right=0
         )
-        obj.patch_descriptions = centroid_list
-        # Add any segmentation-specific initialization here, if needed
+        obj.patch_descriptions = patch_descriptions
         return obj
-    
+
     @classmethod
     def from_tiled_array(cls, tiled_array, positions, original_shape, centroid_list):
         """

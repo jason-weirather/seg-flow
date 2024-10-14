@@ -26,7 +26,6 @@ class SegmentationImage(np.ndarray):
         obj._centroids_cache = None
         obj._segment_patches_cache = None
         obj._checksum = obj._calculate_checksum()
-        obj._bbox_size = None
         return obj
 
     def __init__(self, input_array):
@@ -41,7 +40,8 @@ class SegmentationImage(np.ndarray):
         """
         Copy attributes from the source image to the new instance.
         """
-        self._bbox_size = source_image._bbox_size # It is fine to set it to None
+        # Set any attributes from source_image here
+        pass
 
     def _calculate_checksum(self):
         """
@@ -54,7 +54,6 @@ class SegmentationImage(np.ndarray):
         Invalidate the cached centroids if the array has been modified.
         """
         self._centroids_cache = None
-        self._segment_patches_cache = None
 
     def __setitem__(self, key, value):
         """
@@ -68,19 +67,6 @@ class SegmentationImage(np.ndarray):
         if self._centroids_cache is None:
             self._calculate_centroids()
         return self._centroids_cache
-
-    @property
-    def bbox_size(self):
-        return self._bbox_size
-
-    @bbox_size.setter
-    def bbox_size(self, value):
-        def is_two_int_tuple(obj):
-            return isinstance(obj, tuple) and len(obj) == 2 and all(isinstance(x, int) for x in obj)
-        if not is_two_int_tuple(value):
-            raise ValueError("bbox_size must be a tuple (y,x)")
-        self._bbox_size = value
-        self._invalidate_cache()
 
     def randomize_segmentation(self, seed=1):
         """
@@ -184,27 +170,19 @@ class SegmentationImage(np.ndarray):
         Zero-labeled regions (background) are excluded.
 
         Returns:
-        - A dictionary where keys are labels (excluding zero) and values are metadata including centroid,
-          bounding box position, and cell size in pixels.
+        - A dictionary where keys are labels (excluding zero) and values are the centroid coordinate,
         """
         # Check if cached centroids are valid
         current_checksum = self._calculate_checksum()
         if (
             self._centroids_cache is not None and
-            current_checksum == self._checksum and
-            self._bbox_size is not None
+            current_checksum == self._checksum
         ):
             return self._centroids_cache
 
-        if self.bbox_size is None:
-            raise ValueError("Bounding box size must be set before calculating centroids.")
 
         centroids = {}
         regions = regionprops(self)
-
-        # Calculate centroids and update the cache
-        half_height = self._bbox_size[0] // 2
-        half_width = self._bbox_size[1] // 2
 
         for region in tqdm(regions, desc="Calculating Centroids", unit="region"):
             if region.label != 0:
@@ -212,53 +190,9 @@ class SegmentationImage(np.ndarray):
                 centroid_y = int(round(centroid_y))
                 centroid_x = int(round(centroid_x))
 
-                # Calculate bounding box coordinates
-                y_min = centroid_y - half_height
-                y_max = centroid_y + half_height
-                x_min = centroid_x - half_width
-                x_max = centroid_x + half_width
-
-                # Initialize edge indicators
-                on_edge = {'top': False,'bottom': False,'left': False,'right': False}
-
-                # Adjust coordinates if they are out of bounds
-                if y_min < 0:
-                    on_edge['top'] = True
-                    y_min = 0
-                    y_max = self.bbox_size[0]
-                if y_max > self.shape[0]:
-                    on_edge['bottom'] = True
-                    y_max = self.shape[0]
-                    y_min = self.shape[0] - self.bbox_size[0]
-                if x_min < 0:
-                    on_edge['left'] = True
-                    x_min = 0
-                    x_max = self.bbox_size[1]
-                if x_max > self.shape[1]:
-                    on_edge['right'] = True
-                    x_max = self.shape[1]
-                    x_min = self.shape[1] - self.bbox_size[1]
-
-                # Ensure that the bounding box has the correct size
-                y_min = max(y_min, 0)
-                y_max = min(y_max, self.shape[0])
-                x_min = max(x_min, 0)
-                x_max = min(x_max, self.shape[1])
-
-                # Count pixels within the bounding box that belong to the current label
-                bbox_y_max = min(self.shape[0], y_min + self.bbox_size[0])
-                bbox_x_max = min(self.shape[1], x_min + self.bbox_size[1])
-                patch = self[y_min:bbox_y_max, x_min:bbox_x_max]
-                cell_area_px = np.sum(np.asarray(patch == region.label))
-
 
                 # Store metadata
-                centroids[region.label] = {
-                    'centroid': (centroid_y, centroid_x),
-                    'region_label': region.label,
-                    'bbox_position': (y_min, x_min),
-                    'on_edge': on_edge
-                }
+                centroids[region.label] = (centroid_y, centroid_x)
 
         # Cache the centroids and update the checksum and bbox_size
         self._centroids_cache = centroids
@@ -296,7 +230,7 @@ class SegmentationImage(np.ndarray):
             # Convert centroid coordinates to integer indices for lookup
             centroids_in_false_areas = [
                 label for label, centroid in centroids.items()
-                if not binary_mask_bool[int(centroid['centroid'][0]), int(centroid['centroid'][1])]
+                if not binary_mask_bool[int(centroid[0]), int(centroid[1])]
             ]
             
             # Set the regions with centroids in false areas to zero
@@ -326,47 +260,3 @@ class SegmentationImage(np.ndarray):
         new_instance = self.__class__(new_image)
         new_instance._initialize_attributes(self)
         return new_instance
-
-    @property
-    def segment_patches(self):
-        from ..tiled_image import SegmentationPatchTiledImage
-        if self._bbox_size is None:
-            raise ValueError("Bounding box size must be set before accessing segment patches.")
-        return SegmentationPatchTiledImage.from_image(self,bbox_size=self.bbox_size)
-        from ..tiled_image import SegmentationTiledImage
-
-        current_checksum = self._calculate_checksum()
-        if self._segment_patches_cache is not None and current_checksum == self._checksum:
-            return self._segment_patches_cache
-
-        centroids = self.centroids
-        bbox_height, bbox_width = self._bbox_size
-        n_patches = len(centroids.keys())
-
-        # Initialize an array for patches
-        patches_array = np.zeros((n_patches, bbox_height, bbox_width), dtype=self.dtype)
-        image_height, image_width = self.shape
-
-        for idx, (label_value, centroid_info) in tqdm(enumerate(centroids.items()),desc="Building patches",total=len(centroids)):
-            y_min, x_min = centroid_info['bbox_position']
-
-            # Calculate bounding box coordinates
-            y_max = min(y_min + bbox_height, image_height)
-            x_max = min(x_min + bbox_width, image_width)
-
-            # Extract the patch
-            patch = self[y_min:y_max, x_min:x_max]
-
-            patches_array[idx,:,:] = patch
-
-
-        self._segment_patches_cache = SegmentationTiledImage.from_tiled_array(
-            np.array(patches_array, dtype=self.dtype),
-            positions = [x['bbox_position'] for x in centroids.values()],
-            original_shape = self.shape,
-            pad_top = 0,
-            pad_bottom = 0,
-            pad_left = 0,
-            pad_right = 0
-        )
-        return self._segment_patches_cache

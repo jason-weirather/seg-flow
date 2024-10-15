@@ -5,6 +5,7 @@ from scipy.ndimage import binary_erosion as nd_binary_erosion
 from skimage.measure import regionprops
 from tqdm import tqdm
 import hashlib
+import cv2
 
 from scipy.ndimage import distance_transform_edt
 from scipy.ndimage import binary_dilation, generate_binary_structure
@@ -327,7 +328,7 @@ class SegmentationImage(np.ndarray):
         new_instance._initialize_attributes(self)
         return new_instance
 
-    def dilate_segmentation(self, dilation_pixels=1):
+    def dilate_segmentation3(self, dilation_pixels=1):
         """
         Dilate each non-zero label in the segmentation image by a specified number of pixels.
 
@@ -355,7 +356,7 @@ class SegmentationImage(np.ndarray):
         new_instance._initialize_attributes(self)
         return new_instance
 
-    def erode_segmentation(self, erosion_pixels=1):
+    def erode_segmentation3(self, erosion_pixels=1):
         """
         Erode each non-zero label in the segmentation image by a specified number of pixels.
 
@@ -388,9 +389,166 @@ class SegmentationImage(np.ndarray):
         new_instance._initialize_attributes(self)
         return new_instance
 
+    def close_segmentation(self, closing_pixels=1):
+        """
+        Fill small holes in the segmentation image by performing morphological closing.
+
+        Parameters:
+        - closing_pixels: Number of pixels to close.
+
+        Returns:
+        - SegmentationImage instance with closed areas.
+        """
+        if closing_pixels < 1:
+            raise ValueError("closing_pixels must be at least 1")
+
+        if self.dtype == np.bool_ or np.array_equal(np.unique(self), [0, 1]):
+            # Binary segmentation
+            image_uint8 = (self.astype(np.uint8) * 255)
+            closed = morphological_closing_fast(image_uint8, closing_pixels)
+            new_image = (closed > 0).astype(self.dtype)
+        else:
+            # For labeled images, you might need a different approach
+            # because morphological closing can merge labels.
+            # You can process each label individually if needed.
+            pass  # Implement as required
+
+        new_instance = self.__class__(new_image)
+        new_instance._initialize_attributes(self)
+        return new_instance
+
+    def dilate_segmentation(self, dilation_pixels=1):
+        """
+        Dilate each non-zero label in the segmentation image by a specified number of pixels.
+
+        Parameters:
+        - dilation_pixels: Number of pixels to dilate each label.
+
+        Returns:
+        - SegmentationImage instance with dilated labels.
+        """
+        if dilation_pixels < 1:
+            raise ValueError("dilation_pixels must be at least 1")
+
+        if self.dtype == np.bool_ or np.array_equal(np.unique(self), [0, 1]):
+            # Binary segmentation
+            # Convert boolean image to uint8 format expected by OpenCV
+            image_uint8 = (self.astype(np.uint8) * 255)
+            dilated = binary_dilation_fast(image_uint8, dilation_pixels)
+            # Convert back to original format
+            new_image = (dilated > 0).astype(self.dtype)
+        else:
+            # Labeled segmentation
+            # Use expand_labels from skimage.segmentation
+            from skimage.segmentation import expand_labels
+            dilated = expand_labels(self, distance=dilation_pixels)
+            new_image = dilated.astype(self.dtype)
+        
+        new_instance = self.__class__(new_image)
+        new_instance._initialize_attributes(self)
+        return new_instance
+
+    def erode_segmentation(self, erosion_pixels=1):
+        """
+        Erode each non-zero label in the segmentation image by a specified number of pixels.
+
+        Parameters:
+        - erosion_pixels: Number of pixels to erode each label.
+
+        Returns:
+        - SegmentationImage instance with eroded labels.
+        """
+        if erosion_pixels < 1:
+            raise ValueError("erosion_pixels must be at least 1")
+
+        if self.dtype == np.bool_ or np.array_equal(np.unique(self), [0, 1]):
+            # Binary segmentation
+            # Convert boolean image to uint8 format expected by OpenCV
+            image_uint8 = (self.astype(np.uint8) * 255)
+            eroded = binary_erosion_fast(image_uint8, erosion_pixels)
+            # Convert back to original format
+            new_image = (eroded > 0).astype(self.dtype)
+        else:
+            # Labeled segmentation
+            # Erode each label individually to prevent label merging
+            labels = np.unique(self)
+            labels = labels[labels != 0]  # Exclude background
+            eroded = np.zeros_like(self)
+            for label in labels:
+                mask = (self == label).astype(np.uint8) * 255
+                eroded_mask = binary_erosion_fast(mask, erosion_pixels)
+                eroded[eroded_mask > 0] = label
+            new_image = eroded.astype(self.dtype)
+
+        new_instance = self.__class__(new_image)
+        new_instance._initialize_attributes(self)
+        return new_instance
+
+
+def morphological_closing_fast(image, closing_radius):
+    """
+    Perform morphological closing using OpenCV with a circular structuring element.
+
+    Parameters:
+    - image: Binary input image (numpy array of type uint8 with values 0 or 255).
+    - closing_radius: Radius of the structuring element.
+
+    Returns:
+    - Image after morphological closing.
+    """
+    kernel_size = 2 * closing_radius + 1
+    selem = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+
+    closed_image = cv2.morphologyEx(
+        image, cv2.MORPH_CLOSE, selem, borderType=cv2.BORDER_REPLICATE
+    )
+
+    return closed_image
+
 
 
 def binary_dilation_fast(image, dilation_radius):
+    """
+    Perform binary dilation using OpenCV with a circular structuring element.
+
+    Parameters:
+    - image: Binary input image (numpy array of type uint8 with values 0 or 255).
+    - dilation_radius: Radius of the structuring element.
+
+    Returns:
+    - Dilated binary image.
+    """
+    # Create a circular structuring element
+    kernel_size = 2 * dilation_radius + 1
+    selem = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+
+    # Perform dilation
+    dilated_image = cv2.dilate(image, selem, iterations=1)
+
+    return dilated_image
+
+def binary_erosion_fast(image, erosion_radius):
+    """
+    Perform binary erosion using OpenCV with a circular structuring element.
+
+    Parameters:
+    - image: Binary input image (numpy array of type uint8 with values 0 or 255).
+    - erosion_radius: Radius of the structuring element.
+
+    Returns:
+    - Eroded binary image.
+    """
+    # Create a circular structuring element
+    kernel_size = 2 * erosion_radius + 1
+    selem = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+
+    # Perform erosion
+    eroded_image = cv2.erode(image, selem, iterations=1)
+
+    return eroded_image
+
+
+def binary_dilation_fast3(image, dilation_radius):
     """
     Perform binary dilation on a large binary image efficiently.
 
@@ -408,7 +566,7 @@ def binary_dilation_fast(image, dilation_radius):
     return dilated_image.astype(image.dtype)
 
 
-def binary_erosion_fast(image, erosion_radius):
+def binary_erosion_fast3(image, erosion_radius):
     """
     Perform binary erosion on a large binary image efficiently.
 

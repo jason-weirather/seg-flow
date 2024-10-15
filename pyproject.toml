@@ -22,7 +22,8 @@ classifiers = [
 dependencies = [
     "tifffile",
     "numpy",
-    "scikit-image<=0.19"
+    "scikit-image<=0.19",
+    "cv2"
 ]
 
 [tool.setuptools.packages.find]

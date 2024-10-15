@@ -21,6 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "tifffile",
+    "imagecodecs",
     "numpy",
     "scikit-image<=0.19",
     "opencv-python"

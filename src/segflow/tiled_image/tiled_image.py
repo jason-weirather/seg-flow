@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.ndimage import gaussian_filter
 
 from ..full_image import ContinuousSingleChannelImage
 
@@ -317,6 +318,8 @@ class TiledImage(np.ndarray):
             return ContinuousSingleChannelImage(self._combine_tiles_average(crop))
         elif method == "overwrite":
             return ContinuousSingleChannelImage(self._combine_tiles_overwrite(crop))
+        elif method == "gaussian_blending":
+            return ContinuousSingleChannelImage(self._combine_tiles_gaussian_blending(crop))
         else:
             raise ValueError(f"Invalid method '{method}'. Choose from 'average' or 'overwrite'.")
 
@@ -394,3 +397,65 @@ class TiledImage(np.ndarray):
             ]
 
         return reconstructed_image
+
+
+    def _combine_tiles_gaussian_blending(self, crop, sigma=10):
+        """
+        Combine tiles by applying Gaussian blending to overlapping regions.
+        
+        Parameters:
+            crop (bool): If True, crop the padded area to return the original image size.
+            sigma (float): Standard deviation for Gaussian kernel to control blending. Default is 10.
+        """
+        # Determine if the image is single-channel or multi-channel based on the tile shape
+        is_single_channel = self.shape[-1] == 1 if self.ndim == 4 else True
+
+        # Initialize the reconstructed image and weight matrix
+        if is_single_channel:
+            reconstructed_image = np.zeros((self.padded_shape[0], self.padded_shape[1]), dtype=np.float32)
+            weight_matrix = np.zeros((self.padded_shape[0], self.padded_shape[1]), dtype=np.float32)
+        else:
+            reconstructed_image = np.zeros((self.padded_shape[0], self.padded_shape[1], self.shape[-1]), dtype=np.float32)
+            weight_matrix = np.zeros((self.padded_shape[0], self.padded_shape[1], 1), dtype=np.float32)
+
+        # Create a Gaussian weight mask for each tile
+        tile_height, tile_width = self.shape[1:3]
+        gaussian_weights = np.ones((tile_height, tile_width), dtype=np.float32)
+        gaussian_weights = gaussian_filter(gaussian_weights, sigma=sigma)
+
+        # Normalize the weights to make sure the sum is 1 within each tile
+        gaussian_weights /= gaussian_weights.max()
+
+        # If multi-channel, expand the Gaussian weights to match the number of channels
+        if not is_single_channel:
+            gaussian_weights = np.expand_dims(gaussian_weights, axis=-1)
+
+        # Iterate through each tile and add it to the reconstructed image with Gaussian weights
+        for tile, (y, x) in zip(self, self.positions):
+            tile_height, tile_width = tile.shape[0:2]
+            
+            if is_single_channel:
+                reconstructed_image[y:y+tile_height, x:x+tile_width] += tile * gaussian_weights
+                weight_matrix[y:y+tile_height, x:x+tile_width] += gaussian_weights
+            else:
+                reconstructed_image[y:y+tile_height, x:x+tile_width, :] += tile * gaussian_weights
+                weight_matrix[y:y+tile_height, x:x+tile_width, :] += gaussian_weights
+
+        # Avoid division by zero
+        weight_matrix[weight_matrix == 0] = 1
+
+        # Average the overlapping areas with the weighted sum
+        if is_single_channel:
+            reconstructed_image /= weight_matrix
+        else:
+            reconstructed_image /= weight_matrix
+
+        # Crop the padded area to return the original image size if crop is True
+        if crop:
+            reconstructed_image = reconstructed_image[
+                self.pad_top:self.padded_shape[0] - self.pad_bottom,
+                self.pad_left:self.padded_shape[1] - self.pad_right
+            ]
+
+        return reconstructed_image
+

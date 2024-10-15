@@ -70,7 +70,7 @@ class OMETiffHelper:
             }
         return None
 
-    def get_channel_data(self, channel_index):
+    def get_channel_data_by_index(self, channel_index):
         """
         Get the image data for the specified channel index.
         
@@ -82,6 +82,23 @@ class OMETiffHelper:
         """
         series = self.tif.series[0]
         return series.pages[channel_index].asarray()
+
+    def get_channel_data_by_id(self, channel_id):
+        """
+        Get the image data for the specified channel by its ID.
+        
+        Parameters:
+        - channel_id: ID of the channel to extract.
+        
+        Returns:
+        - Numpy array representing the specified channel.
+        """
+        # Find the index of the channel by matching the ID
+        for idx, channel in enumerate(self.channels_info):
+            if channel['ID'] == channel_id:
+                return self.get_channel_data_by_index(idx)
+        
+        raise ValueError(f"Channel with ID '{channel_id}' not found.")
 
     def __str__(self):
         """
@@ -99,8 +116,8 @@ class OMETiffHelper:
                 f"Pixel Size X: {self.image_info['Pixel Size X']} {self.image_info['Pixel Size Unit']}",
                 f"Pixel Size Y: {self.image_info['Pixel Size Y']} {self.image_info['Pixel Size Unit']}",
                 f"Number of Channels: {len(self.channels_info)}"]
-        for idx, channel in enumerate(self.channels_info, start=1):
-            info.append(f"  Channel {idx}: {channel['Name']} (ID: {channel['ID']})")
+        for idx, channel in enumerate(self.channels_info, start=0):
+            info.append(f"  Channel index {idx}: {channel['Name']} (ID: {channel['ID']})")
         return "\n".join(info)
 
     def _repr_html_(self):

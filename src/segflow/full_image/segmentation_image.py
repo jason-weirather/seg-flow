@@ -6,6 +6,16 @@ from skimage.measure import regionprops
 from tqdm import tqdm
 import hashlib
 
+from scipy.ndimage import distance_transform_edt
+from scipy.ndimage import binary_dilation, generate_binary_structure
+
+import numpy as np
+from scipy.ndimage import distance_transform_edt
+from skimage.segmentation import expand_labels
+
+from scipy.ndimage import minimum_filter, maximum_filter
+
+
 class SegmentationImage(np.ndarray):
     def __new__(cls, input_array):
         """
@@ -99,7 +109,7 @@ class SegmentationImage(np.ndarray):
         new_instance._initialize_attributes(self)
         return new_instance
 
-    def dilate_segmentation(self, dilation_pixels=1):
+    def dilate_segmentation2(self, dilation_pixels=1):
         """
         Dilate each non-zero label in the segmentation image by a specified number of pixels.
 
@@ -128,7 +138,7 @@ class SegmentationImage(np.ndarray):
        	new_instance._initialize_attributes(self)
        	return new_instance
 
-    def erode_segmentation(self, erosion_pixels=1):
+    def erode_segmentation2(self, erosion_pixels=1):
         """
         Erode each non-zero label in the segmentation image by a specified number of pixels.
 
@@ -260,3 +270,158 @@ class SegmentationImage(np.ndarray):
         new_instance = self.__class__(new_image)
         new_instance._initialize_attributes(self)
         return new_instance
+
+
+
+
+    def dilate_segmentation(self, dilation_pixels=1):
+        """
+        Dilate each non-zero label in the segmentation image by a specified number of pixels.
+
+        Parameters:
+        - dilation_pixels: Number of pixels to dilate each label.
+
+        Returns:
+        - SegmentationImage instance with dilated labels.
+        """
+        if dilation_pixels < 1:
+            raise ValueError("dilation_pixels must be at least 1")
+
+        if self.dtype == np.bool_ or np.array_equal(np.unique(self), [0, 1]):
+            # Binary segmentation
+            dilated = binary_dilation_fast(self, dilation_pixels)
+            new_image = dilated.astype(self.dtype)
+        else:
+            # Labeled segmentation
+            dilated = dilate_labels(self, dilation_pixels)
+            new_image = dilated.astype(self.dtype)
+
+    
+        new_instance = self.__class__(new_image)
+        new_instance._initialize_attributes(self)
+        return new_instance
+
+    def erode_segmentation(self, erosion_pixels=1):
+        """
+        Erode each non-zero label in the segmentation image by a specified number of pixels.
+
+        Parameters:
+        - erosion_pixels: Number of pixels to erode each label.
+
+        Returns:
+        - SegmentationImage instance with eroded labels.
+        """
+        if erosion_pixels < 1:
+            raise ValueError("erosion_pixels must be at least 1")
+
+        if self.dtype == np.bool_ or np.array_equal(np.unique(self), [0, 1]):
+            # Binary segmentation
+            eroded = binary_erosion_fast(self, erosion_pixels)
+            new_image = eroded.astype(self.dtype)
+        else:
+            # Labeled segmentation
+            eroded = erode_labels(self, erosion_pixels)
+            new_image = eroded.astype(self.dtype)
+
+        new_instance = self.__class__(new_image)
+        new_instance._initialize_attributes(self)
+        return new_instance
+
+    def dilate_segmentation(self, dilation_pixels=1):
+        """
+        Dilate each non-zero label in the segmentation image by a specified number of pixels.
+
+        Parameters:
+        - dilation_pixels: Number of pixels to dilate each label.
+
+        Returns:
+        - SegmentationImage instance with dilated labels.
+        """
+        if dilation_pixels < 1:
+            raise ValueError("dilation_pixels must be at least 1")
+
+        if self.dtype == np.bool_ or np.array_equal(np.unique(self), [0, 1]):
+            # Binary segmentation
+            dilated = binary_dilation_fast(self, dilation_pixels)
+            new_image = dilated.astype(self.dtype)
+        else:
+            # Labeled segmentation
+            # Use expand_labels from skimage.segmentation
+            from skimage.segmentation import expand_labels
+            dilated = expand_labels(self, distance=dilation_pixels)
+            new_image = dilated.astype(self.dtype)
+        
+        new_instance = self.__class__(new_image)
+        new_instance._initialize_attributes(self)
+        return new_instance
+
+    def erode_segmentation(self, erosion_pixels=1):
+        """
+        Erode each non-zero label in the segmentation image by a specified number of pixels.
+
+        Parameters:
+        - erosion_pixels: Number of pixels to erode each label.
+
+        Returns:
+        - SegmentationImage instance with eroded labels.
+        """
+        if erosion_pixels < 1:
+            raise ValueError("erosion_pixels must be at least 1")
+
+        if self.dtype == np.bool_ or np.array_equal(np.unique(self), [0, 1]):
+            # Binary segmentation
+            eroded = binary_erosion_fast(self, erosion_pixels)
+            new_image = eroded.astype(self.dtype)
+        else:
+            # Labeled segmentation
+            # Erode each label individually to prevent label merging
+            labels = np.unique(self)
+            labels = labels[labels != 0]  # Exclude background
+            eroded = np.zeros_like(self)
+            for label in labels:
+                mask = self == label
+                eroded_mask = binary_erosion_fast(mask, erosion_pixels)
+                eroded[eroded_mask] = label
+            new_image = eroded.astype(self.dtype)
+
+        new_instance = self.__class__(new_image)
+        new_instance._initialize_attributes(self)
+        return new_instance
+
+
+
+def binary_dilation_fast(image, dilation_radius):
+    """
+    Perform binary dilation on a large binary image efficiently.
+
+    Parameters:
+    - image: Binary input image (boolean or 0/1).
+    - dilation_radius: Number of pixels to dilate.
+
+    Returns:
+    - Dilated binary image.
+    """
+    # Use a square structuring element with size based on the dilation radius
+    size = 2 * dilation_radius + 1
+    # Perform the dilation using maximum_filter
+    dilated_image = maximum_filter(image, size=size, mode='constant')
+    return dilated_image.astype(image.dtype)
+
+
+def binary_erosion_fast(image, erosion_radius):
+    """
+    Perform binary erosion on a large binary image efficiently.
+
+    Parameters:
+    - image: Binary input image (boolean or 0/1).
+    - erosion_radius: Number of pixels to erode.
+
+    Returns:
+    - Eroded binary image.
+    """
+    # Use a square structuring element with size based on the erosion radius
+    size = 2 * erosion_radius + 1
+    # Perform the erosion using minimum_filter
+    eroded_image = minimum_filter(image, size=size, mode='constant')
+    return eroded_image.astype(image.dtype)
+

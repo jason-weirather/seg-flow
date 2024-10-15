@@ -23,7 +23,7 @@ dependencies = [
     "tifffile",
     "numpy",
     "scikit-image<=0.19",
-    "cv2"
+    "opencv-python"
 ]
 
 [tool.setuptools.packages.find]

@@ -3,7 +3,7 @@ from tqdm import tqdm
 from .tiled_image import TiledImage
 
 class SegFlow:
-    def __init__(self, tile_size=512, stride=256, average_weight=0.7, sum_weight=0.3, min_pixels=5):
+    def __init__(self, tile_size=(512,512), stride=(256,256), average_weight=0.7, sum_weight=0.3, min_pixels=5):
         """
         Initialize the Segment class with parameters for image tiling.
         
@@ -53,4 +53,9 @@ class SegFlow:
             print("Normalized image shape:", self.image.shape)
 
     def extract_raw_tiles(self):
-        return TiledImage.from_image(self.image, self.tile_size, self.stride, min_padding = self.stride // 2)
+        return TiledImage.from_image(
+            self.image,
+            self.tile_size,
+            self.stride,
+            min_padding = (self.stride[0] // 2, self.stride[1] // 2)
+        )

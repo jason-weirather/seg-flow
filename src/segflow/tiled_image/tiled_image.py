@@ -1,4 +1,5 @@
 import numpy as np
+from tqdm import tqdm
 from scipy.ndimage import gaussian_filter
 
 from ..full_image import ContinuousSingleChannelImage
@@ -26,22 +27,22 @@ class TiledImage(np.ndarray):
         return obj
 
     @classmethod
-    def from_image(cls, input_image, tile_size, stride, min_padding):
+    def from_image(cls, input_image, bbox_size, stride, min_padding):
         """
         Factory method to create a TiledImage from a fresh untiled image.
 
         Parameters:
         - input_image: Numpy array of the original image (height, width) or (height, width, m_channels).
-        - tile_size: Size of each tile.
+        - bbox_size: Size of each tile.
         - stride: Stride size for tiling the image.
-        - min_padding: Minimum padding to add to ensure complete coverage.
+        - min_padding: Minimum padding to add to ensure complete coverage (height, width).
         
         Returns:
         - TiledImage instance.
 
         Note: This method also sets the padding properties (pad_top, pad_bottom, pad_left, pad_right).
         """
-        tiles, positions, pad_top, pad_bottom, pad_left, pad_right = cls._create_tiled_image(input_image, tile_size, stride, min_padding)
+        tiles, positions, pad_top, pad_bottom, pad_left, pad_right = cls._create_tiled_image(input_image, bbox_size, stride, min_padding)
         obj = tiles.view(cls)
         obj.pad_top = pad_top
         obj.pad_bottom = pad_bottom
@@ -53,11 +54,56 @@ class TiledImage(np.ndarray):
         )
         obj.positions = positions
         obj.original_shape = input_image.shape
-        obj.tile_size = tile_size
+        #obj.bbox_size = bbox_size
         return obj
 
     @classmethod
-    def from_tiled_array(cls, tiled_array, positions, original_shape, pad_top, pad_bottom, pad_left, pad_right):
+    def from_image_matching_positions(cls, input_image, bbox_size, positions, pad_top=0, pad_bottom=0, pad_left=0, pad_right=0):
+        """
+        Create a TiledImage from a continuous single-channel image, given tile positions and bbox size.
+
+        Parameters:
+        - input_image: A ContinuousSingleChannelImage instance (2D continuous data).
+        - bbox_size: A tuple of (size_y, size_x) for bounding box size of each patch.
+        - positions: The position (min_y, min_x) of each tile
+
+        Returns:
+        - TiledImage instance with patches tiled from the input image.
+        """        
+        image_height, image_width = input_image.shape
+        bbox_height, bbox_width = bbox_size
+
+        # Calculate the number of patches in both dimensions
+        n_patches = len(positions)
+
+        patches_array = np.zeros((n_patches, bbox_height, bbox_width), dtype=input_image.dtype)
+
+        # Iterate through the image to extract patches and metadata
+        for patch_idx, patch_position in tqdm(enumerate(positions), desc="Extracting patches", total=len(positions)):
+            patch = input_image[
+                patch_position[0]:patch_position[0] + bbox_height,
+                patch_position[1]:patch_position[1] + bbox_width
+            ]
+
+            patches_array[patch_idx, :, :] = patch
+
+        obj = patches_array.view(cls)
+        obj.pad_top = pad_top
+        obj.pad_bottom = pad_bottom
+        obj.pad_left = pad_left
+        obj.pad_right = pad_right
+        obj.padded_shape = (
+            input_image.shape[0] + obj.pad_top + obj.pad_bottom,
+            input_image.shape[1] + obj.pad_left + obj.pad_right
+        )
+        obj.positions = positions
+        obj.original_shape = input_image.shape
+        #obj.bbox_size = bbox_size
+
+        return obj
+
+    @classmethod
+    def from_tiled_array(cls, tiled_array, positions, original_shape, pad_top=0, pad_bottom=0, pad_left=0, pad_right=0):
         """
         Factory method to create a TiledImage from an existing tiled array.
 
@@ -80,7 +126,7 @@ class TiledImage(np.ndarray):
         obj.pad_bottom = pad_bottom
         obj.pad_left = pad_left
         obj.pad_right = pad_right
-        obj.tile_size = tiled_array.shape[1]  # Assuming all tiles have the same height and width
+        #obj.bbox_size = tiled_array.shape[1:3]  # Assuming all tiles have the same height and width
 
         # Find the furthest extent in both dimensions based on positions
         max_y = obj.original_shape[0] + pad_top + pad_bottom
@@ -97,6 +143,9 @@ class TiledImage(np.ndarray):
 
         return obj
 
+    @property
+    def bbox_size(self):
+        return self.shape[1:3]
 
     @property
     def padding(self):
@@ -114,15 +163,15 @@ class TiledImage(np.ndarray):
         }
 
     @staticmethod
-    def _create_tiled_image(input_image, tile_size, stride, min_padding):
+    def _create_tiled_image(input_image, bbox_size, stride, min_padding):
         """
         Pad the input image and extract tiles from it.
 
         Parameters:
         - input_image: Numpy array of the original image.
-        - tile_size: Size of each tile.
+        - bbox_size: Size of each tile.
         - stride: Stride size for tiling the image.
-        - min_padding: Minimum padding to add to ensure complete coverage.
+        - min_padding: Minimum padding to add to ensure complete coverage (height, width).
         
         Returns:
         - tiles: Numpy array of extracted tiles.
@@ -134,15 +183,15 @@ class TiledImage(np.ndarray):
         """
         # Step 1: Add minimum padding as a margin all around the image
         if input_image.ndim == 3:
-            padding = ((min_padding, min_padding), (min_padding, min_padding), (0, 0))
+            padding = ((min_padding[0], min_padding[1]), (min_padding[0], min_padding[1]), (0, 0))
         else:
-            padding = ((min_padding, min_padding), (min_padding, min_padding))
+            padding = ((min_padding[0], min_padding[1]), (min_padding[0], min_padding[1]))
         image_padded = np.pad(input_image, padding, mode='reflect')
 
         # Step 2: Calculate additional padding to ensure tiling fits properly
         height, width = image_padded.shape[:2]
-        pad_height_total = (tile_size - (height - tile_size) % stride) % stride
-        pad_width_total = (tile_size - (width - tile_size) % stride) % stride
+        pad_height_total = (bbox_size[0] - (height - bbox_size[0]) % stride[0]) % stride[0]
+        pad_width_total = (bbox_size[1] - (width - bbox_size[1]) % stride[1]) % stride[1]
 
         # Step 3: Split the additional padding as evenly as possible
         pad_top_extra = pad_height_total // 2
@@ -158,25 +207,25 @@ class TiledImage(np.ndarray):
         image_padded = np.pad(image_padded, padding, mode='reflect')
 
         # Total padding
-        pad_top = min_padding + pad_top_extra
-        pad_bottom = min_padding + pad_bottom_extra
-        pad_left = min_padding + pad_left_extra
-        pad_right = min_padding + pad_right_extra
+        pad_top = min_padding[0] + pad_top_extra
+        pad_bottom = min_padding[0] + pad_bottom_extra
+        pad_left = min_padding[1] + pad_left_extra
+        pad_right = min_padding[1] + pad_right_extra
 
         # Step 5: Extract tiles from the padded image
-        tiles, positions = TiledImage._extract_tiles(image_padded, tile_size, stride)
+        tiles, positions = TiledImage._extract_tiles(image_padded, bbox_size, stride)
 
         return tiles, positions, pad_top, pad_bottom, pad_left, pad_right
 
     @staticmethod
-    def _extract_tiles(image, tile_size, stride):
+    def _extract_tiles(image, bbox_size, stride):
         """
         Extract overlapping tiles from the given image.
 
         Parameters:
         - image: Numpy array of the padded image to extract tiles from.
-        - tile_size: Size of each tile.
-        - stride: Stride for extracting tiles.
+        - bbox_size: Size of each tile (height, width).
+        - stride: Stride for extracting tiles (distance_y, distance_x).
         
         Returns:
         - tiles: Numpy array of extracted tiles.
@@ -185,20 +234,20 @@ class TiledImage(np.ndarray):
         tiles = []
         positions = []
         height, width = image.shape[:2]
-        for y in range(0, height - tile_size + 1, stride):
-            for x in range(0, width - tile_size + 1, stride):
+        for y in range(0, height - bbox_size[0] + 1, stride[0]):
+            for x in range(0, width - bbox_size[1] + 1, stride[1]):
                 # Extract tile
                 if image.ndim == 3:
-                    tile = image[y:y+tile_size, x:x+tile_size, :]
+                    tile = image[y:y+bbox_size[0], x:x+bbox_size[1], :]
                 else:
-                    tile = image[y:y+tile_size, x:x+tile_size]
+                    tile = image[y:y+bbox_size[0], x:x+bbox_size[1]]
                 tiles.append(tile)
                 positions.append((y, x))
         return np.array(tiles), positions
 
     def __array_finalize__(self, obj):
         if obj is None: return
-        self.tile_size = getattr(obj, 'tile_size', None)
+        #self.bbox_size = getattr(obj, 'bbox_size', None)
         self.stride = getattr(obj, 'stride', None)
         self.min_padding = getattr(obj, 'min_padding', None)
         self.original_shape = getattr(obj, 'original_shape', None)
@@ -227,66 +276,12 @@ class TiledImage(np.ndarray):
         obj.pad_bottom = self.pad_bottom
         obj.pad_left = self.pad_left
         obj.pad_right = self.pad_right
-        obj.tile_size = self.tile_size
+        #obj.bbox_size = self.bbox_size
         obj.stride = self.stride
         obj.min_padding = self.min_padding
         obj.original_shape = self.original_shape
         obj.padded_shape = self.padded_shape
         return obj
-
-    def combine_tiles2(self, crop=True):
-        """
-        Combine the overlapping tiles to create a complete image by averaging overlapping regions.
-
-        Parameters:
-        - crop: Boolean, if True (default), crops the image to the original size, otherwise returns the full padded image.
-
-        Returns:
-        - Numpy array representing the reconstructed image.
-        """
-        if self.positions is None:
-            raise ValueError("Positions are not set. Make sure the TiledImage was created properly with the correct positions.")
-
-        # Determine if the image is single-channel or multi-channel based on the tile shape
-        is_single_channel = self.shape[-1] == 1 if self.ndim == 4 else True
-
-        # Initialize the reconstructed image and weight matrix
-        if is_single_channel:
-            reconstructed_image = np.zeros((self.padded_shape[0], self.padded_shape[1]), dtype=np.float32)
-            weight_matrix = np.zeros((self.padded_shape[0], self.padded_shape[1]), dtype=np.float32)
-        else:
-            reconstructed_image = np.zeros((self.padded_shape[0], self.padded_shape[1], self.shape[-1]), dtype=np.float32)
-            weight_matrix = np.zeros((self.padded_shape[0], self.padded_shape[1], 1), dtype=np.float32)
-
-        # Iterate through each tile and add it to the reconstructed image with appropriate weights
-        for tile, (y, x) in zip(self, self.positions):
-            tile_height, tile_width = tile.shape[0:2]
-            
-            if is_single_channel:
-                reconstructed_image[y:y+tile_height, x:x+tile_width] += tile  # Single channel, no need to squeeze
-                weight_matrix[y:y+tile_height, x:x+tile_width] += 1
-            else:
-                reconstructed_image[y:y+tile_height, x:x+tile_width, :] += tile
-                weight_matrix[y:y+tile_height, x:x+tile_width, :] += 1
-
-        # Avoid division by zero
-        weight_matrix[weight_matrix == 0] = 1
-
-        # Average the overlapping areas
-        if is_single_channel:
-            reconstructed_image /= weight_matrix
-        else:
-            reconstructed_image /= weight_matrix
-
-        # Crop the padded area to return the original image size if crop is True
-        if crop:
-            reconstructed_image = reconstructed_image[
-                self.pad_top:self.padded_shape[0] - self.pad_bottom,
-                self.pad_left:self.padded_shape[1] - self.pad_right
-            ]
-
-        return ContinuousSingleChannelImage(reconstructed_image)
-
 
     def reform_image_overwrite(self, crop=True):
         """

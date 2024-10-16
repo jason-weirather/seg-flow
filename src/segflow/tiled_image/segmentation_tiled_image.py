@@ -23,13 +23,13 @@ class SegmentationTiledImage(TiledImage):
         return obj
 
     @classmethod
-    def from_image(cls, input_image, tile_size, stride, min_padding):
+    def from_image(cls, input_image, bbox_size, stride, min_padding):
         """
         Factory method to create a SegmentationTiledImage from a fresh untiled image.
 
         Parameters:
         - input_image: Numpy array of the segmented image (height, width) or (height, width, labels).
-        - tile_size: Size of each tile.
+        - bbox_size: Size of each tile.
         - stride: Stride size for tiling the image.
         - min_padding: Minimum padding to add to ensure complete coverage.
         
@@ -37,7 +37,7 @@ class SegmentationTiledImage(TiledImage):
         - SegmentationTiledImage instance.
         """
         # Call the base class method to create the tiled image
-        obj = super(SegmentationTiledImage, cls).from_image(input_image, tile_size, stride, min_padding)
+        obj = super(SegmentationTiledImage, cls).from_image(input_image, bbox_size, stride, min_padding)
         # Add any segmentation-specific initialization here, if needed
         return obj
 
@@ -84,8 +84,8 @@ class SegmentationTiledImage(TiledImage):
         for idx, (tile_segmentation, (y, x)) in tqdm(enumerate(zip(self, self.positions)), desc="Processing tiles", total=len(self.positions)):
             if len(tile_segmentation.shape) == 3:
                 tile_segmentation = tile_segmentation.squeeze(axis=-1)
-            y_end = y + self.tile_size
-            x_end = x + self.tile_size
+            y_end = y + self.bbox_size[0]
+            x_end = x + self.bbox_size[1]
 
             # Extract the region from the full segmentation mask that corresponds to the tile
             full_mask_region = full_segmentation_mask[y:y_end, x:x_end]
@@ -179,9 +179,9 @@ class SegmentationTiledImage(TiledImage):
         for idx, (tile_segmentation, (y, x)) in tqdm(enumerate(zip(segmentation_tiles, positions)),desc="Removing edge cells",total=len(positions)):
             # Extract the high-confidence central region of the tile
             y_start = margin_size_px
-            y_end = self.tile_size - margin_size_px
+            y_end = self.bbox_size[0] - margin_size_px
             x_start = margin_size_px
-            x_end = self.tile_size - margin_size_px
+            x_end = self.bbox_size[1] - margin_size_px
 
             high_confidence_region = tile_segmentation[y_start:y_end, x_start:x_end]
             labels_in_high_confidence = np.unique(high_confidence_region)

@@ -16,6 +16,8 @@ from skimage.segmentation import expand_labels
 
 from scipy.ndimage import minimum_filter, maximum_filter
 
+from skimage.segmentation import expand_labels
+
 
 class SegmentationImage(np.ndarray):
     def __new__(cls, input_array):
@@ -79,6 +81,25 @@ class SegmentationImage(np.ndarray):
             self._calculate_centroids()
         return self._centroids_cache
 
+    def has_missing_cells(self):
+        """
+        Check if any labels in the SegmentationImage have no associated pixels.
+
+        Returns:
+        - bool: True if any labels are missing (i.e., have no pixels), otherwise False.
+        """
+        # Get all unique labels in the segmentation image
+        labels = np.unique(self)
+        
+        # Check each label (except for background label 0) for missing pixels
+        for label in labels:
+            if label == 0:
+                continue  # Skip the background label
+            if np.sum(self == label) == 0:
+                return True  # Missing cell found
+
+        return False  # No missing cells
+
     def randomize_segmentation(self, seed=1):
         """
         Randomize cell labels in the segmentation mask for better visualization.
@@ -126,10 +147,12 @@ class SegmentationImage(np.ndarray):
         new_image = self.copy()
         if self.dtype == np.bool_ or np.array_equal(np.unique(self), [0, 1]):
             # Binary segmentation
+            print("dilating a binary segmentation")
             selem = disk(dilation_pixels)
             dilated = binary_dilation(self, selem)
             new_image = dilated.astype(self.dtype)
         else:
+            print("dilating a label segmentation")
             # Labeled segmentation
             # Use expand_labels from skimage.segmentation
             dilated = expand_labels(self, distance=dilation_pixels)
@@ -275,7 +298,7 @@ class SegmentationImage(np.ndarray):
 
 
 
-    def dilate_segmentation(self, dilation_pixels=1):
+    def dilate_segmentation4(self, dilation_pixels=1):
         """
         Dilate each non-zero label in the segmentation image by a specified number of pixels.
 
@@ -302,7 +325,7 @@ class SegmentationImage(np.ndarray):
         new_instance._initialize_attributes(self)
         return new_instance
 
-    def erode_segmentation(self, erosion_pixels=1):
+    def erode_segmentation4(self, erosion_pixels=1):
         """
         Erode each non-zero label in the segmentation image by a specified number of pixels.
 
@@ -582,4 +605,21 @@ def binary_erosion_fast3(image, erosion_radius):
     # Perform the erosion using minimum_filter
     eroded_image = minimum_filter(image, size=size, mode='constant')
     return eroded_image.astype(image.dtype)
+
+
+
+def dilate_labels4(labels, dilation_radius):
+    """
+    Dilate labeled image efficiently using distance transform.
+
+    Parameters:
+    - labels: Input labeled image (numpy array).
+    - dilation_radius: Radius for dilation (number of pixels).
+
+    Returns:
+    - Dilated labeled image.
+    """
+    # Expand the labeled regions using the expand_labels function
+    dilated_labels = expand_labels(labels, distance=dilation_radius)
+    return dilated_labels
 

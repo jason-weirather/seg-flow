@@ -80,8 +80,9 @@ class OMETiffHelper:
         Returns:
         - Numpy array representing the specified channel.
         """
+        from .full_image import ContinuousSingleChannelImage
         series = self.tif.series[0]
-        return series.pages[channel_index].asarray()
+        return ContinuousSingleChannelImage(series.pages[channel_index].asarray())
 
     def get_channel_data_by_id(self, channel_id):
         """
